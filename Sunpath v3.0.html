@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sun Path AR Overlay</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      overflow: hidden;
+      background: #000;
+      font-family: Arial, sans-serif;
+    }
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    video, canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    video { display: none; }
+    canvas { z-index: 2; }
+
+    .controls {
+      position: absolute;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      display: flex; gap: 10px;
+    }
+    .controls button {
+      padding: 8px 12px;
+      font-size: 14px;
+      border: none;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      cursor: pointer;
+    }
+    .controls button:hover {
+      background: rgba(255,255,255,0.2);
+    }
+    #shadeFactor {
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.6);
+      color: #0f0;
+      font-weight: bold;
+      border-radius: 4px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="camera" autoplay playsinline muted></video>
+    <canvas id="sunPathCanvas"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="toggleCamera">Enable Camera</button>
+    <button id="toggleSelect">Segment Selection Mode</button>
+    <div id="shadeFactor">Shade: 1.00</div>
+    <button id="save">Save Snapshot</button>
+  </div>
+
+  <script>
+  (function(){
+    const video  = document.getElementById('camera');
+    const canvas = document.getElementById('sunPathCanvas');
+    const ctx    = canvas.getContext('2d');
+
+    // full-screen canvas
+    const resize = ()=> {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', resize);
+    resize();
+
+    // sun-path coordinate transforms
+    const xMin=-135, xMax=135, yMin=0, yMax=65;
+    const transformX = x => (x - xMin) * (canvas.width/(xMax-xMin));
+    const transformY = y => canvas.height - (y - yMin) * (canvas.height/(yMax-yMin));
+
+    // original sun-path data
+    const data = [
+      [[-130,0],[-101,21.6],[-90,29.1],[-81,36],[-72,42.3],[-64,47],[-56,50.6],[-48,53.5],[-40,56.5],[-32,58.8],[-22,60.3],[-11,61.3],[0,62],[11,61.3],[22,60.3],[32,58.8],[40,56.5],[48,53.5],[56,50.6],[64,47],[72,42.3],[81,36],[90,29.1],[101,21.6],[130,0]],
+      [[-120,0],[-98,17.7],[-86,26.1],[-77,32.7],[-69,38.1],[-62,42.3],[-54,46],[-46,49.1],[-37,52.4],[-26,54.9],[-16,56.4],[-5,57.2],[5,57.2],[16,56.4],[26,54.9],[37,52.4],[46,49.1],[54,46],[62,42.3],[69,38.1],[77,32.7],[86,26.1],[98,17.7],[120,0]],
+      [[-105,0],[-87,13.3],[-76,21.1],[-66,28.1],[-57,34.1],[-49,38],[-41,41.4],[-32,44.3],[-22,46.6],[-10,48.2],[0,48.5],[10,48.2],[22,46.6],[32,44.3],[41,41.4],[49,38],[57,34.1],[66,28.1],[76,21.1],[87,13.3],[105,0]],
+      [[-87,0],[-68,13.2],[-58,21.1],[-46,28.3],[-36,32.1],[-25,35.2],[-13,37],[0,37.7],[13,37],[25,35.2],[36,32.1],[46,28.3],[58,21.1],[68,13.2],[87,0]],
+      [[-69,0],[-52,11.8],[-39,19.3],[-23,24.5],[-8,26.7],[8,26.7],[23,24.5],[39,19.3],[52,11.8],[69,0]],
+      [[-55,0],[-36.8,9.5],[-19,15.3],[0,17.5],[19,15.3],[36.8,9.5],[55,0]],
+      [[-48,0],[-34,7.1],[-17,12.2],[0,13.7],[17,12.2],[34,7.1],[48,0]]
+    ];
+    const midpoints = [
+      [[-120,0],[-97,18.2],[-87,25.6],[-77.5,32.5],[-68,38.8],[-60,43.1],[-53,46.4],[-45,49.5],[-38,52.2],[-30,54.2],[-21,55.7],[-10,57],[0,57.4],[10,57],[21,55.7],[30,54.2],[38,52.2],[45,49.5],[53,46.4],[60,43.1],[68,38.8],[77.5,32.5],[87,25.6],[97,18.2],[120,0]],
+      [[-105,0],[-91,10.8],[-79,18.8],[-71,24.9],[-63,30.3],[-56,34.8],[-48,38.5],[-42,41.2],[-33,44.2],[-23,46.4],[-12,47.9],[-3,48.6],[3,48.6],[12,47.9],[23,46.4],[33,44.2],[42,41.2],[48,38.5],[56,34.8],[63,30.3],[71,24.9],[79,18.8],[91,10.8],[105,0]],
+      [[-87,0],[-80,4.7],[-69,12.5],[-59,20.4],[-50.9,25.7],[-44,29.2],[-36,32.1],[-27,34.9],[-18,36.5],[-8,37.5],[0,37.6],[8,37.5],[18,36.5],[27,34.9],[36,32.1],[44,29.2],[50.9,25.7],[59,20.4],[69,12.5],[80,4.7],[87,0]],
+      [[-69,0],[-61,5.7],[-51.7,12.2],[-39.7,18.9],[-30,22.6],[-20.8,25.1],[-11,26.5],[0,27.1],[11,26.5],[20.8,25.1],[30,22.6],[39.7,18.9],[51.7,12.2],[61,5.7],[69,0]],
+      [[-55,0],[-47,4.6],[-32.8,11.2],[-19,15.3],[-6,17.2],[6,17.2],[19,15.4],[32.8,11.2],[47,4.6],[55,0]],
+      [[-48,0],[-33.8,7],[-18,11.8],[0,13.5],[18,11.8],[33.8,7],[48,0]]
+    ];
+
+    // state
+    let selectedSegments = midpoints.map(r=>Array(r.length-1).fill(false));
+    let shadeFactor = 1.0;
+    let cameraMode  = false;
+    let selectMode  = true;
+    let heading     = 0;
+    let pitch       = 0;
+
+    // UI buttons
+    document.getElementById('toggleCamera').onclick = async () => {
+      if (!cameraMode) {
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+          video.srcObject = s;
+          video.style.display = 'block';
+        } catch {
+          alert('Camera access denied');
+          return;
+        }
+        if (DeviceOrientationEvent?.requestPermission) {
+          try {
+            const p = await DeviceOrientationEvent.requestPermission();
+            if (p !== 'granted') throw '';
+          } catch {
+            alert('Motion access denied');
+          }
+        }
+        window.addEventListener('deviceorientation', e => {
+          if (e.alpha != null) heading = e.alpha;
+          if (e.beta  != null) pitch   = e.beta;
+        });
+      } else {
+        video.srcObject?.getTracks().forEach(t=>t.stop());
+        video.style.display = 'none';
+      }
+      cameraMode = !cameraMode;
+      document.getElementById('toggleCamera').textContent =
+        cameraMode ? 'Disable Camera' : 'Enable Camera';
+    };
+
+    document.getElementById('toggleSelect').onclick = () => {
+      selectMode = !selectMode;
+      document.getElementById('toggleSelect').textContent =
+        selectMode ? 'Segment Selection Mode' : 'Viewing Mode';
+    };
+
+    document.getElementById('save').onclick = () => {
+      const link = document.createElement('a');
+      link.download = 'sunpath_overlay.png';
+      link.href = canvas.toDataURL();
+      link.click();
+    };
+
+    function updateShade(){
+      let c = 0;
+      selectedSegments.forEach(r=> c += r.filter(v=>v).length);
+      shadeFactor = Math.max(0, 1 - c*0.01);
+      document.getElementById('shadeFactor').textContent = `Shade: ${shadeFactor.toFixed(2)}`;
+    }
+
+    canvas.addEventListener('click', e => {
+      if (!selectMode) return;
+      const r = canvas.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      for (let ri=0; ri<midpoints.length; ri++){
+        const curve = data[ri], mids = midpoints[ri];
+        for (let i=1; i<mids.length-1; i++){
+          ctx.beginPath();
+          const [x1,y1]=curve[i], [x2,y2]=curve[i+1],
+                [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
+          ctx.moveTo(transformX(x1),transformY(y1));
+          ctx.lineTo(transformX(x2),transformY(y2));
+          ctx.lineTo(transformX(x4),transformY(y4));
+          ctx.lineTo(transformX(x3),transformY(y3));
+          ctx.closePath();
+          if (ctx.isPointInPath(mx,my)){
+            selectedSegments[ri][i] = !selectedSegments[ri][i];
+            updateShade();
+            return;
+          }
+        }
+      }
+    });
+
+    // draw routines
+    function drawSmoothCurve(points){
+      ctx.beginPath();
+      ctx.moveTo(transformX(points[0][0]), transformY(points[0][1]));
+      for (let i=1; i<points.length-1; i++){
+        const [x1,y1]=points[i], [x2,y2]=points[i+1];
+        const cx=(x1+x2)/2, cy=(y1+y2)/2;
+        ctx.quadraticCurveTo(transformX(x1),transformY(y1), transformX(cx),transformY(cy));
+      }
+      const lp = points[points.length-1];
+      ctx.lineTo(transformX(lp[0]),transformY(lp[1]));
+      ctx.stroke();
+    }
+
+    function drawSegments(curve, nextCurve, mids, ri){
+      for (let i=0; i<mids.length-1; i++){
+        ctx.beginPath();
+        const [x1,y1]=curve[i], [x2,y2]=curve[i+1],
+              [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
+        ctx.moveTo(transformX(x1),transformY(y1));
+        ctx.lineTo(transformX(x2),transformY(y2));
+        ctx.lineTo(transformX(x4),transformY(y4));
+        ctx.lineTo(transformX(x3),transformY(y3));
+        ctx.closePath();
+        if (i===0||i===mids.length-2) {
+          ctx.fillStyle = 'grey';
+        } else if (selectedSegments[ri][i]) {
+          ctx.fillStyle = 'rgba(0,0,255,0.5)';
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0)';
+        }
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    function drawDashedLines(){
+      [-90,-45,45,90].forEach(x=>{
+        ctx.setLineDash([5,5]);
+        ctx.beginPath();
+        ctx.moveTo(transformX(x), transformY(yMin));
+        ctx.lineTo(transformX(x), transformY(yMax));
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+
+    function drawSunPath(){
+      // baseline
+      ctx.strokeStyle='black';
+      ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(transformX(xMin), transformY(0));
+      ctx.lineTo(transformX(xMax), transformY(0));
+      ctx.stroke();
+
+      // segments
+      for (let i=0; i<data.length-1; i++){
+        drawSegments(data[i], data[i+1], midpoints[i], i);
+      }
+      // smooth curves
+      ctx.lineWidth=2.5;
+      data.forEach(drawSmoothCurve);
+      // meridian
+      ctx.setLineDash([5,5]);
+      ctx.beginPath();
+      ctx.moveTo(transformX(0), transformY(yMin));
+      ctx.lineTo(transformX(0), transformY(yMax));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      drawDashedLines();
+    }
+
+    function drawCompassBars(){
+      const W = canvas.width, H = canvas.height;
+      ['N',0,'E',90,'S',180,'W',270].reduce((_,d,i,a)=>{
+        if (i%2){
+          const dir=a[i-1], ang=a[i];
+          let Δ = ang - heading;
+          Δ = ((Δ+180)%360) - 180;
+          if (Math.abs(Δ) <= 90){
+            const x = W/2 + (Δ/90)*(W/2);
+            ctx.strokeStyle='#0f0'; ctx.lineWidth=2;
+            ctx.beginPath();
+            ctx.moveTo(x, H*0.05);
+            ctx.lineTo(x, H*0.15);
+            ctx.stroke();
+            ctx.fillStyle='#0f0';
+            ctx.font='16px Arial';
+            ctx.textAlign='center';
+            ctx.fillText(dir, x, H*0.03);
+          }
+        }
+      },null);
+    }
+
+    function drawHorizon(){
+      const H = canvas.height;
+      const yOff = (pitch/90)*(H/2);
+      ctx.strokeStyle='yellow'; ctx.lineWidth=3;
+      ctx.beginPath();
+      ctx.moveTo(0, H/2 + yOff);
+      ctx.lineTo(canvas.width, H/2 + yOff);
+      ctx.stroke();
+    }
+
+    function loop(){
+      if (cameraMode && video.readyState >= 2) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+      }
+      drawSunPath();
+      if (cameraMode) {
+        drawCompassBars();
+        drawHorizon();
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+  })();
+  </script>
+</body>
+</html>
