@@ -12,10 +12,11 @@
       font-family: Arial, sans-serif;
       color: #fff;
     }
+    /* now a 1:3 height-to-width ratio */
     #container {
       position: relative;
       width: 100vw;
-      aspect-ratio: 3 / 1;
+      aspect-ratio: 3 / 1;        /* width : height = 3:1 */
       margin: 0 auto;
       overflow: hidden;
       background: #000;
@@ -23,8 +24,7 @@
     #container video,
     #container canvas {
       position: absolute;
-      top: 0;
-      left: 0;
+      top: 0; left: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -83,11 +83,11 @@
     const btnCapture  = document.getElementById('capture');
     const btnDownload = document.getElementById('downloadSnapshot');
 
-    // resize to fixed 270:65 ratio
+    // resize to width × (width ÷ 3)
     const resize = () => {
       const w = window.innerWidth;
       canvas.width  = w;
-      canvas.height = w * (65/270);
+      canvas.height = w / 3;
     };
     window.addEventListener('resize', resize);
     resize();
@@ -125,16 +125,13 @@
     let pitch            = 0;
     let freezeFrame      = false;
 
-    // orientation handler
     function handleOrient(e) {
       if (e.alpha != null) heading = e.alpha;
       if (e.beta  != null) pitch   = e.beta;
     }
 
-    // toggle camera & motion
     btnCamera.onclick = async () => {
       if (!cameraMode) {
-        // camera
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
           video.srcObject = stream;
@@ -142,9 +139,7 @@
         } catch {
           return alert('Camera access denied');
         }
-        // motion/orientation (iOS requires user gesture)
-        if (typeof DeviceOrientationEvent !== 'undefined'
-            && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        if (DeviceOrientationEvent.requestPermission) {
           try {
             const resp = await DeviceOrientationEvent.requestPermission();
             if (resp === 'granted') {
@@ -156,11 +151,9 @@
             alert('Motion/orientation access denied');
           }
         } else {
-          // other browsers
           window.addEventListener('deviceorientation', handleOrient, true);
         }
       } else {
-        // disable
         video.srcObject?.getTracks().forEach(t=>t.stop());
         video.style.display = 'none';
         window.removeEventListener('deviceorientation', handleOrient, true);
@@ -175,7 +168,6 @@
         : 'Enable Camera & Motion';
     };
 
-    // toggle selection mode
     btnSelect.onclick = () => {
       selectMode = !selectMode;
       btnSelect.textContent = selectMode
@@ -183,7 +175,6 @@
         : 'Viewing Mode';
     };
 
-    // capture (freeze)
     btnCapture.onclick = () => {
       if (cameraMode && !freezeFrame) {
         video.pause();
@@ -192,7 +183,6 @@
       }
     };
 
-    // download snapshot
     btnDownload.onclick = () => {
       const link = document.createElement('a');
       link.download = 'sunpath_overlay.png';
@@ -207,23 +197,22 @@
       document.getElementById('shadeFactor').textContent = `Shade: ${shadeFactor.toFixed(2)}`;
     }
 
-    // segment click handler
     canvas.addEventListener('click', e => {
       if (!selectMode) return;
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
-      for (let ri = 0; ri < midpoints.length; ri++) {
+      for (let ri=0; ri<midpoints.length; ri++){
         const curve = data[ri], mids = midpoints[ri];
-        for (let i = 1; i < mids.length - 1; i++) {
+        for (let i=1; i<mids.length-1; i++){
           ctx.beginPath();
-          const [x1,y1] = curve[i],   [x2,y2] = curve[i+1];
-          const [x3,y3] = mids[i],    [x4,y4] = mids[i+1];
-          ctx.moveTo(transformX(x1), transformY(y1));
-          ctx.lineTo(transformX(x2), transformY(y2));
-          ctx.lineTo(transformX(x4), transformY(y4));
-          ctx.lineTo(transformX(x3), transformY(y3));
+          const [x1,y1]=curve[i], [x2,y2]=curve[i+1];
+          const [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
+          ctx.moveTo(transformX(x1),transformY(y1));
+          ctx.lineTo(transformX(x2),transformY(y2));
+          ctx.lineTo(transformX(x4),transformY(y4));
+          ctx.lineTo(transformX(x3),transformY(y3));
           ctx.closePath();
-          if (ctx.isPointInPath(mx, my)) {
+          if (ctx.isPointInPath(mx,my)){
             selectedSegments[ri][i] = !selectedSegments[ri][i];
             updateShade();
             return;
@@ -232,31 +221,30 @@
       }
     });
 
-    // drawing routines
     function drawSmoothCurve(points){
       ctx.beginPath();
       ctx.moveTo(transformX(points[0][0]), transformY(points[0][1]));
-      for (let i = 1; i < points.length - 1; i++){
-        const [x1,y1] = points[i], [x2,y2] = points[i+1];
-        const cx = (x1 + x2)/2, cy = (y1 + y2)/2;
-        ctx.quadraticCurveTo(transformX(x1), transformY(y1), transformX(cx), transformY(cy));
+      for (let i=1; i<points.length-1; i++){
+        const [x1,y1]=points[i], [x2,y2]=points[i+1];
+        const cx=(x1+x2)/2, cy=(y1+y2)/2;
+        ctx.quadraticCurveTo(transformX(x1),transformY(y1), transformX(cx),transformY(cy));
       }
-      const lp = points[points.length - 1];
-      ctx.lineTo(transformX(lp[0]), transformY(lp[1]));
+      const lp = points[points.length-1];
+      ctx.lineTo(transformX(lp[0]),transformY(lp[1]));
       ctx.stroke();
     }
 
     function drawSegments(curve, nextCurve, mids, ri){
-      for (let i = 0; i < mids.length - 1; i++){
+      for (let i=0; i<mids.length-1; i++){
         ctx.beginPath();
-        const [x1,y1] = curve[i],   [x2,y2] = curve[i+1];
-        const [x3,y3] = mids[i],    [x4,y4] = mids[i+1];
-        ctx.moveTo(transformX(x1), transformY(y1));
-        ctx.lineTo(transformX(x2), transformY(y2));
-        ctx.lineTo(transformX(x4), transformY(y4));
-        ctx.lineTo(transformX(x3), transformY(y3));
+        const [x1,y1]=curve[i], [x2,y2]=curve[i+1];
+        const [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
+        ctx.moveTo(transformX(x1),transformY(y1));
+        ctx.lineTo(transformX(x2),transformY(y2));
+        ctx.lineTo(transformX(x4),transformY(y4));
+        ctx.lineTo(transformX(x3),transformY(y3));
         ctx.closePath();
-        if (i === 0 || i === mids.length - 2) {
+        if (i===0||i===mids.length-2) {
           ctx.fillStyle = 'grey';
         } else if (selectedSegments[ri][i]) {
           ctx.fillStyle = 'rgba(0,0,255,0.5)';
@@ -269,7 +257,7 @@
     }
 
     function drawDashedLines(){
-      [-90, -45, 45, 90].forEach(x => {
+      [-90,-45,45,90].forEach(x=>{
         ctx.setLineDash([5,5]);
         ctx.beginPath();
         ctx.moveTo(transformX(x), transformY(yMin));
@@ -280,21 +268,17 @@
     }
 
     function drawSunPath(){
-      // baseline
-      ctx.strokeStyle = 'black';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle='black';
+      ctx.lineWidth=1;
       ctx.beginPath();
       ctx.moveTo(transformX(xMin), transformY(0));
       ctx.lineTo(transformX(xMax), transformY(0));
       ctx.stroke();
-      // segments
-      for (let i = 0; i < data.length - 1; i++){
+      for (let i=0; i<data.length-1; i++){
         drawSegments(data[i], data[i+1], midpoints[i], i);
       }
-      // smooth curves
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth=2.5;
       data.forEach(drawSmoothCurve);
-      // meridian
       ctx.setLineDash([5,5]);
       ctx.beginPath();
       ctx.moveTo(transformX(0), transformY(yMin));
@@ -306,45 +290,45 @@
 
     function drawCompassBars(){
       const W = canvas.width, H = canvas.height;
-      ['N',0,'E',90,'S',180,'W',270].reduce((_, d, i, a) => {
-        if (i % 2) {
-          const dir = a[i-1], ang = a[i];
+      ['N',0,'E',90,'S',180,'W',270].reduce((_,d,i,a)=>{
+        if(i%2){
+          const dir=a[i-1], ang=a[i];
           let Δ = ang - heading;
-          Δ = ((Δ + 180) % 360) - 180;
-          if (Math.abs(Δ) <= 90) {
+          Δ = ((Δ+180)%360) - 180;
+          if(Math.abs(Δ)<=90){
             const x = W/2 + (Δ/90)*(W/2);
-            ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2;
+            ctx.strokeStyle='#0f0'; ctx.lineWidth=2;
             ctx.beginPath();
-            ctx.moveTo(x, H*0.05);
-            ctx.lineTo(x, H*0.15);
+            ctx.moveTo(x,H*0.05);
+            ctx.lineTo(x,H*0.15);
             ctx.stroke();
-            ctx.fillStyle = '#0f0';
-            ctx.font = '16px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(dir, x, H*0.03);
+            ctx.fillStyle='#0f0';
+            ctx.font='16px Arial';
+            ctx.textAlign='center';
+            ctx.fillText(dir,x,H*0.03);
           }
         }
-      }, null);
+      },null);
     }
 
     function drawHorizon(){
       const H = canvas.height;
       const yOff = (pitch/90)*(H/2);
-      ctx.strokeStyle = 'yellow'; ctx.lineWidth = 3;
+      ctx.strokeStyle='yellow'; ctx.lineWidth=3;
       ctx.beginPath();
-      ctx.moveTo(0, H/2 + yOff);
-      ctx.lineTo(canvas.width, H/2 + yOff);
+      ctx.moveTo(0,H/2+yOff);
+      ctx.lineTo(canvas.width,H/2+yOff);
       ctx.stroke();
     }
 
     function loop(){
-      if (cameraMode && video.readyState >= 2 && !freezeFrame) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      } else if (!freezeFrame) {
+      if(cameraMode && video.readyState>=2 && !freezeFrame){
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      } else if(!freezeFrame){
         ctx.clearRect(0,0,canvas.width,canvas.height);
       }
       drawSunPath();
-      if (cameraMode) {
+      if(cameraMode){
         drawCompassBars();
         drawHorizon();
       }
