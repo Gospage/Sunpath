@@ -6,34 +6,39 @@
   <title>Sun Path AR Overlay</title>
   <style>
     html, body {
-      margin: 0; padding: 0;
-      overflow: hidden;
+      margin: 0;
+      padding: 0;
       background: #000;
       font-family: Arial, sans-serif;
+      color: #fff;
     }
     #container {
       position: relative;
       width: 100vw;
-      height: 100vh;
+      aspect-ratio: 270 / 65;
+      margin: 0 auto;
       overflow: hidden;
+      background: #000;
     }
-    video, canvas {
+    #container video,
+    #container canvas {
       position: absolute;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
     }
-    video { display: none; }
-    canvas { z-index: 2; }
-
     .controls {
-      position: absolute;
-      bottom: 20px; left: 50%;
-      transform: translateX(-50%);
-      z-index: 3;
-      display: flex; gap: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: #111;
     }
-    .controls button {
+    .controls button,
+    .controls #shadeFactor {
       padding: 8px 12px;
       font-size: 14px;
       border: none;
@@ -45,13 +50,12 @@
     .controls button:hover {
       background: rgba(255,255,255,0.2);
     }
-    #shadeFactor {
-      padding: 8px 12px;
+    .controls #shadeFactor {
       background: rgba(0,0,0,0.6);
       color: #0f0;
       font-weight: bold;
-      border-radius: 4px;
       line-height: 1;
+      pointer-events: none;
     }
   </style>
 </head>
@@ -62,32 +66,38 @@
   </div>
 
   <div class="controls">
-    <button id="toggleCamera">Enable Camera</button>
+    <button id="toggleCamera">Enable Camera & Motion</button>
     <button id="toggleSelect">Segment Selection Mode</button>
     <div id="shadeFactor">Shade: 1.00</div>
-    <button id="save">Save Snapshot</button>
+    <button id="capture">Capture Snapshot</button>
+    <button id="downloadSnapshot" style="display:none;">Save Snapshot</button>
   </div>
 
   <script>
   (function(){
-    const video  = document.getElementById('camera');
-    const canvas = document.getElementById('sunPathCanvas');
-    const ctx    = canvas.getContext('2d');
+    const video       = document.getElementById('camera');
+    const canvas      = document.getElementById('sunPathCanvas');
+    const ctx         = canvas.getContext('2d');
+    const btnCamera   = document.getElementById('toggleCamera');
+    const btnSelect   = document.getElementById('toggleSelect');
+    const btnCapture  = document.getElementById('capture');
+    const btnDownload = document.getElementById('downloadSnapshot');
 
-    // full-screen canvas
-    const resize = ()=> {
-      canvas.width  = window.innerWidth;
-      canvas.height = window.innerHeight;
+    // resize to fixed 270:65 ratio
+    const resize = () => {
+      const w = window.innerWidth;
+      canvas.width  = w;
+      canvas.height = w * (65/270);
     };
     window.addEventListener('resize', resize);
     resize();
 
-    // sun-path coordinate transforms
+    // coordinate transforms
     const xMin=-135, xMax=135, yMin=0, yMax=65;
     const transformX = x => (x - xMin) * (canvas.width/(xMax-xMin));
     const transformY = y => canvas.height - (y - yMin) * (canvas.height/(yMax-yMin));
 
-    // original sun-path data
+    // sun-path data
     const data = [
       [[-130,0],[-101,21.6],[-90,29.1],[-81,36],[-72,42.3],[-64,47],[-56,50.6],[-48,53.5],[-40,56.5],[-32,58.8],[-22,60.3],[-11,61.3],[0,62],[11,61.3],[22,60.3],[32,58.8],[40,56.5],[48,53.5],[56,50.6],[64,47],[72,42.3],[81,36],[90,29.1],[101,21.6],[130,0]],
       [[-120,0],[-98,17.7],[-86,26.1],[-77,32.7],[-69,38.1],[-62,42.3],[-54,46],[-46,49.1],[-37,52.4],[-26,54.9],[-16,56.4],[-5,57.2],[5,57.2],[16,56.4],[26,54.9],[37,52.4],[46,49.1],[54,46],[62,42.3],[69,38.1],[77,32.7],[86,26.1],[98,17.7],[120,0]],
@@ -108,51 +118,82 @@
 
     // state
     let selectedSegments = midpoints.map(r=>Array(r.length-1).fill(false));
-    let shadeFactor = 1.0;
-    let cameraMode  = false;
-    let selectMode  = true;
-    let heading     = 0;
-    let pitch       = 0;
+    let shadeFactor      = 1.0;
+    let cameraMode       = false;
+    let selectMode       = true;
+    let heading          = 0;
+    let pitch            = 0;
+    let freezeFrame      = false;
 
-    // UI buttons
-    document.getElementById('toggleCamera').onclick = async () => {
+    // orientation handler
+    function handleOrient(e) {
+      if (e.alpha != null) heading = e.alpha;
+      if (e.beta  != null) pitch   = e.beta;
+    }
+
+    // toggle camera & motion
+    btnCamera.onclick = async () => {
       if (!cameraMode) {
+        // camera
         try {
-          const s = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
-          video.srcObject = s;
+          const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+          video.srcObject = stream;
           video.style.display = 'block';
         } catch {
-          alert('Camera access denied');
-          return;
+          return alert('Camera access denied');
         }
-        if (DeviceOrientationEvent?.requestPermission) {
+        // motion/orientation (iOS requires user gesture)
+        if (typeof DeviceOrientationEvent !== 'undefined'
+            && typeof DeviceOrientationEvent.requestPermission === 'function') {
           try {
-            const p = await DeviceOrientationEvent.requestPermission();
-            if (p !== 'granted') throw '';
+            const resp = await DeviceOrientationEvent.requestPermission();
+            if (resp === 'granted') {
+              window.addEventListener('deviceorientation', handleOrient, true);
+            } else {
+              alert('Motion/orientation access denied');
+            }
           } catch {
-            alert('Motion access denied');
+            alert('Motion/orientation access denied');
           }
+        } else {
+          // other browsers
+          window.addEventListener('deviceorientation', handleOrient, true);
         }
-        window.addEventListener('deviceorientation', e => {
-          if (e.alpha != null) heading = e.alpha;
-          if (e.beta  != null) pitch   = e.beta;
-        });
       } else {
+        // disable
         video.srcObject?.getTracks().forEach(t=>t.stop());
         video.style.display = 'none';
+        window.removeEventListener('deviceorientation', handleOrient, true);
+        if (freezeFrame) {
+          freezeFrame = false;
+          btnDownload.style.display = 'none';
+        }
       }
       cameraMode = !cameraMode;
-      document.getElementById('toggleCamera').textContent =
-        cameraMode ? 'Disable Camera' : 'Enable Camera';
+      btnCamera.textContent = cameraMode
+        ? 'Disable Camera & Motion'
+        : 'Enable Camera & Motion';
     };
 
-    document.getElementById('toggleSelect').onclick = () => {
+    // toggle selection mode
+    btnSelect.onclick = () => {
       selectMode = !selectMode;
-      document.getElementById('toggleSelect').textContent =
-        selectMode ? 'Segment Selection Mode' : 'Viewing Mode';
+      btnSelect.textContent = selectMode
+        ? 'Segment Selection Mode'
+        : 'Viewing Mode';
     };
 
-    document.getElementById('save').onclick = () => {
+    // capture (freeze)
+    btnCapture.onclick = () => {
+      if (cameraMode && !freezeFrame) {
+        video.pause();
+        freezeFrame = true;
+        btnDownload.style.display = 'inline-block';
+      }
+    };
+
+    // download snapshot
+    btnDownload.onclick = () => {
       const link = document.createElement('a');
       link.download = 'sunpath_overlay.png';
       link.href = canvas.toDataURL();
@@ -166,22 +207,23 @@
       document.getElementById('shadeFactor').textContent = `Shade: ${shadeFactor.toFixed(2)}`;
     }
 
+    // segment click handler
     canvas.addEventListener('click', e => {
       if (!selectMode) return;
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
-      for (let ri=0; ri<midpoints.length; ri++){
+      for (let ri = 0; ri < midpoints.length; ri++) {
         const curve = data[ri], mids = midpoints[ri];
-        for (let i=1; i<mids.length-1; i++){
+        for (let i = 1; i < mids.length - 1; i++) {
           ctx.beginPath();
-          const [x1,y1]=curve[i], [x2,y2]=curve[i+1],
-                [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
-          ctx.moveTo(transformX(x1),transformY(y1));
-          ctx.lineTo(transformX(x2),transformY(y2));
-          ctx.lineTo(transformX(x4),transformY(y4));
-          ctx.lineTo(transformX(x3),transformY(y3));
+          const [x1,y1] = curve[i],   [x2,y2] = curve[i+1];
+          const [x3,y3] = mids[i],    [x4,y4] = mids[i+1];
+          ctx.moveTo(transformX(x1), transformY(y1));
+          ctx.lineTo(transformX(x2), transformY(y2));
+          ctx.lineTo(transformX(x4), transformY(y4));
+          ctx.lineTo(transformX(x3), transformY(y3));
           ctx.closePath();
-          if (ctx.isPointInPath(mx,my)){
+          if (ctx.isPointInPath(mx, my)) {
             selectedSegments[ri][i] = !selectedSegments[ri][i];
             updateShade();
             return;
@@ -190,31 +232,31 @@
       }
     });
 
-    // draw routines
+    // drawing routines
     function drawSmoothCurve(points){
       ctx.beginPath();
       ctx.moveTo(transformX(points[0][0]), transformY(points[0][1]));
-      for (let i=1; i<points.length-1; i++){
-        const [x1,y1]=points[i], [x2,y2]=points[i+1];
-        const cx=(x1+x2)/2, cy=(y1+y2)/2;
-        ctx.quadraticCurveTo(transformX(x1),transformY(y1), transformX(cx),transformY(cy));
+      for (let i = 1; i < points.length - 1; i++){
+        const [x1,y1] = points[i], [x2,y2] = points[i+1];
+        const cx = (x1 + x2)/2, cy = (y1 + y2)/2;
+        ctx.quadraticCurveTo(transformX(x1), transformY(y1), transformX(cx), transformY(cy));
       }
-      const lp = points[points.length-1];
-      ctx.lineTo(transformX(lp[0]),transformY(lp[1]));
+      const lp = points[points.length - 1];
+      ctx.lineTo(transformX(lp[0]), transformY(lp[1]));
       ctx.stroke();
     }
 
     function drawSegments(curve, nextCurve, mids, ri){
-      for (let i=0; i<mids.length-1; i++){
+      for (let i = 0; i < mids.length - 1; i++){
         ctx.beginPath();
-        const [x1,y1]=curve[i], [x2,y2]=curve[i+1],
-              [x3,y3]=mids[i],  [x4,y4]=mids[i+1];
-        ctx.moveTo(transformX(x1),transformY(y1));
-        ctx.lineTo(transformX(x2),transformY(y2));
-        ctx.lineTo(transformX(x4),transformY(y4));
-        ctx.lineTo(transformX(x3),transformY(y3));
+        const [x1,y1] = curve[i],   [x2,y2] = curve[i+1];
+        const [x3,y3] = mids[i],    [x4,y4] = mids[i+1];
+        ctx.moveTo(transformX(x1), transformY(y1));
+        ctx.lineTo(transformX(x2), transformY(y2));
+        ctx.lineTo(transformX(x4), transformY(y4));
+        ctx.lineTo(transformX(x3), transformY(y3));
         ctx.closePath();
-        if (i===0||i===mids.length-2) {
+        if (i === 0 || i === mids.length - 2) {
           ctx.fillStyle = 'grey';
         } else if (selectedSegments[ri][i]) {
           ctx.fillStyle = 'rgba(0,0,255,0.5)';
@@ -227,7 +269,7 @@
     }
 
     function drawDashedLines(){
-      [-90,-45,45,90].forEach(x=>{
+      [-90, -45, 45, 90].forEach(x => {
         ctx.setLineDash([5,5]);
         ctx.beginPath();
         ctx.moveTo(transformX(x), transformY(yMin));
@@ -239,19 +281,18 @@
 
     function drawSunPath(){
       // baseline
-      ctx.strokeStyle='black';
-      ctx.lineWidth=1;
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(transformX(xMin), transformY(0));
       ctx.lineTo(transformX(xMax), transformY(0));
       ctx.stroke();
-
       // segments
-      for (let i=0; i<data.length-1; i++){
+      for (let i = 0; i < data.length - 1; i++){
         drawSegments(data[i], data[i+1], midpoints[i], i);
       }
       // smooth curves
-      ctx.lineWidth=2.5;
+      ctx.lineWidth = 2.5;
       data.forEach(drawSmoothCurve);
       // meridian
       ctx.setLineDash([5,5]);
@@ -265,31 +306,31 @@
 
     function drawCompassBars(){
       const W = canvas.width, H = canvas.height;
-      ['N',0,'E',90,'S',180,'W',270].reduce((_,d,i,a)=>{
-        if (i%2){
-          const dir=a[i-1], ang=a[i];
+      ['N',0,'E',90,'S',180,'W',270].reduce((_, d, i, a) => {
+        if (i % 2) {
+          const dir = a[i-1], ang = a[i];
           let Δ = ang - heading;
-          Δ = ((Δ+180)%360) - 180;
-          if (Math.abs(Δ) <= 90){
+          Δ = ((Δ + 180) % 360) - 180;
+          if (Math.abs(Δ) <= 90) {
             const x = W/2 + (Δ/90)*(W/2);
-            ctx.strokeStyle='#0f0'; ctx.lineWidth=2;
+            ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(x, H*0.05);
             ctx.lineTo(x, H*0.15);
             ctx.stroke();
-            ctx.fillStyle='#0f0';
-            ctx.font='16px Arial';
-            ctx.textAlign='center';
+            ctx.fillStyle = '#0f0';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
             ctx.fillText(dir, x, H*0.03);
           }
         }
-      },null);
+      }, null);
     }
 
     function drawHorizon(){
       const H = canvas.height;
       const yOff = (pitch/90)*(H/2);
-      ctx.strokeStyle='yellow'; ctx.lineWidth=3;
+      ctx.strokeStyle = 'yellow'; ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(0, H/2 + yOff);
       ctx.lineTo(canvas.width, H/2 + yOff);
@@ -297,9 +338,9 @@
     }
 
     function loop(){
-      if (cameraMode && video.readyState >= 2) {
+      if (cameraMode && video.readyState >= 2 && !freezeFrame) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      } else {
+      } else if (!freezeFrame) {
         ctx.clearRect(0,0,canvas.width,canvas.height);
       }
       drawSunPath();
